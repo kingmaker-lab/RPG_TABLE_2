@@ -2,7 +2,6 @@ import { DurableObject } from 'cloudflare:workers';
 
 interface Env {
   ROOMS: DurableObjectNamespace<GameRoom>;
-  MEDIA: R2Bucket;
 }
 
 type Role = 'mestre' | 'jogador';
@@ -16,7 +15,7 @@ type PublicMember = { id: string; name: string; role: Role; character: Character
 type ChatMessage = { id: string; memberId: string; sender: string; kind: 'chat' | 'roll' | 'system'; text: string; createdAt: number };
 type RoomView = { id: string; name: string; mapId: string | null; me: string; members: PublicMember[]; chat: ChatMessage[] };
 type MemberRow = { id: string; name: string; role: Role; token_hash: string; character: string | null; x: number; y: number };
-type MediaRow = { id: string; kind: Kind; owner_id: string };
+type MediaRow = { id: string; kind: Kind; owner_id: string; mime: string; bytes: Uint8Array; size: number };
 type RoomRow = { id: string; name: string; map_id: string | null };
 type WsAttachment = { memberId: string };
 
@@ -77,7 +76,7 @@ export class GameRoom extends DurableObject<Env> {
       this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS room (id TEXT PRIMARY KEY, name TEXT NOT NULL, map_id TEXT)');
       this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, character TEXT, x REAL NOT NULL DEFAULT 50, y REAL NOT NULL DEFAULT 50)');
       this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS chat (id TEXT PRIMARY KEY, member_id TEXT NOT NULL, sender TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL)');
-      this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS media (id TEXT PRIMARY KEY, kind TEXT NOT NULL, owner_id TEXT NOT NULL)');
+      this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS media (id TEXT PRIMARY KEY, kind TEXT NOT NULL, owner_id TEXT NOT NULL, mime TEXT NOT NULL, bytes BLOB NOT NULL, size INTEGER NOT NULL)');
     });
   }
 
@@ -154,14 +153,21 @@ export class GameRoom extends DurableObject<Env> {
     const m = await this.memberByToken(secret);
     return m ? this.publicState(m.id) : null;
   }
-  async registerMedia(secret: string, id: string, kind: Kind): Promise<boolean> {
+  async saveMedia(secret: string, id: string, kind: Kind, mime: string, bytes: Uint8Array): Promise<boolean> {
     const member = await this.memberByToken(secret);
     if (!member || (kind === 'map' && member.role !== 'mestre')) return false;
-    this.ctx.storage.sql.exec('INSERT INTO media VALUES (?, ?, ?)', id, kind, member.id);
+    if (bytes.byteLength === 0 || bytes.byteLength > (kind === 'map' ? 1_700_000 : 900_000)) return false;
+    const tally = this.ctx.storage.sql.exec<{ total: number; count: number }>(
+      'SELECT COALESCE(SUM(size),0) as total, COUNT(*) as count FROM media'
+    ).one();
+    if (tally.total + bytes.byteLength > 18_000_000 || tally.count >= 30) return false;
+    this.ctx.storage.sql.exec('INSERT INTO media VALUES (?, ?, ?, ?, ?, ?)', id, kind, member.id, mime, bytes, bytes.byteLength);
     return true;
   }
-  async authorizedMedia(secret: string, id: string): Promise<boolean> {
-    return !!(await this.memberByToken(secret)) && !!this.mediaRow(id);
+  async readMedia(secret: string, id: string): Promise<{ mime: string; bytes: Uint8Array } | null> {
+    if (!(await this.memberByToken(secret))) return null;
+    const row = this.mediaRow(id);
+    return row ? { mime: row.mime, bytes: row.bytes } : null;
   }
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return err('Upgrade WebSocket esperado.', 426);
@@ -176,6 +182,14 @@ export class GameRoom extends DurableObject<Env> {
     this.pushStates();
     return new Response(null, { status: 101, webSocket: client, headers: { 'Sec-WebSocket-Protocol': 'arcane-v1' } });
   }
+  private recentActions = new Map<string, number>();
+  private throttle(memberId: string, kind: string, minimumInterval: number): boolean {
+    const key = `${memberId}:${kind}`, now = Date.now();
+    const last = this.recentActions.get(key) ?? 0;
+    if (now - last < minimumInterval) return true;
+    this.recentActions.set(key, now);
+    return false;
+  }
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const attachment = ws.deserializeAttachment() as WsAttachment | null;
     const m = attachment?.memberId && this.memberById(attachment.memberId);
@@ -184,12 +198,14 @@ export class GameRoom extends DurableObject<Env> {
     try { payload = JSON.parse(message) as Record<string, unknown>; } catch { return; }
     switch (payload.type) {
       case 'chat': {
+        if (this.throttle(m.id, 'chat', 650)) return;
         const msg = sane(payload.text, 600);
         if (!msg) return;
         this.addChat(m.id, m.character ? (JSON.parse(m.character) as Character).name : m.name, 'chat', msg);
         break;
       }
       case 'roll': {
+        if (this.throttle(m.id, 'roll', 450)) return;
         const faces = bounded(payload.faces, 0, 100, 0);
         if (![4, 6, 8, 10, 12, 20, 100].includes(faces)) return;
         const bytes = new Uint32Array(1);
@@ -200,6 +216,7 @@ export class GameRoom extends DurableObject<Env> {
         break;
       }
       case 'character': {
+        if (this.throttle(m.id, 'character', 350)) return;
         const c = normalizeCharacter(payload.character);
         if (!c) return;
         if (c.photoId) {
@@ -210,6 +227,7 @@ export class GameRoom extends DurableObject<Env> {
         break;
       }
       case 'move': {
+        if (this.throttle(m.id, 'move', 80)) return;
         const target = sane(payload.targetId, 36) || m.id;
         if (target !== m.id && m.role !== 'mestre') return;
         if (!this.memberById(target)) return;
@@ -254,7 +272,7 @@ export default {
     const origin = request.headers.get('Origin');
     if (origin && origin !== url.origin) return err('Origem não permitida.', 403);
     try {
-      if (url.pathname === '/api/health' && request.method === 'GET') return json({ ok: true, project: 'arcane-table', version: '0.2.0' });
+      if (url.pathname === '/api/health' && request.method === 'GET') return json({ ok: true, project: 'arcane-table', version: '0.3.0-beta', storage: 'durable-objects' });
       if (url.pathname === '/api/rooms' && request.method === 'POST') {
         const data = await request.json() as Record<string, unknown>;
         const name = sane(data.name, 70), host = sane(data.host, 32);
@@ -296,25 +314,21 @@ export default {
         const user = await stub.whoAmI(secret);
         if (!user || (kind === 'map' && user.role !== 'mestre')) return err('Sem permissão.', 403);
         const mime = (request.headers.get('Content-Type') ?? '').split(';')[0];
-        const max = kind === 'map' ? 10_000_000 : 5_000_000;
+        const max = kind === 'map' ? 1_700_000 : 900_000;
         const len = Number(request.headers.get('Content-Length') ?? -1);
-        if (len > max) return err('Imagem muito grande.', 413);
+        if (len > max) return err('Imagem muito grande. Reduza a resolução.', 413);
         const bytes = new Uint8Array(await request.arrayBuffer());
         if (!bytes.byteLength || bytes.byteLength > max) return err('Imagem vazia ou excedeu o limite.', 413);
         if (!safeImage(bytes, mime)) return err('Imagem inválida; use JPG, PNG ou WebP.');
         const id = crypto.randomUUID();
-        await env.MEDIA.put(`${roomId}/${id}`, bytes, { httpMetadata: { contentType: mime } });
-        const accepted = await stub.registerMedia(secret, id, kind);
-        if (!accepted) { await env.MEDIA.delete(`${roomId}/${id}`); return err('Falha ao registrar imagem.', 403); }
+        if (!await stub.saveMedia(secret, id, kind, mime, bytes)) return err('Limite de armazenamento da sala atingido ou acesso negado.', 413);
         return json({ mediaId: id }, 201);
       }
       if (action === 'media' && mediaId && request.method === 'GET') {
-        const valid = await stub.authorizedMedia(secret, mediaId);
-        if (!valid) return err('Imagem não encontrada ou sem permissão.', 404);
-        const object = await env.MEDIA.get(`${roomId}/${mediaId}`);
-        if (!object) return err('Imagem não encontrada.', 404);
-        return new Response(object.body, {
-          headers: { ...baseHeaders, 'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream' },
+        const media = await stub.readMedia(secret, mediaId);
+        if (!media) return err('Imagem não encontrada ou sem permissão.', 404);
+        return new Response(media.bytes, {
+          headers: { ...baseHeaders, 'Content-Type': media.mime },
         });
       }
       return err('Rota não encontrada.', 404);
