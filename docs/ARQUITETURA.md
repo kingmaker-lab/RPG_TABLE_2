@@ -1,0 +1,66 @@
+# Arquitetura | Arcane Table 0.2
+
+## Caminho principal
+
+```mermaid
+flowchart LR
+    A[Jogador - navegador] -->|HTTPS e WebSocket| B[Cloudflare Worker]
+    M[Mestre - navegador] -->|HTTPS e WebSocket| B
+    B -->|RPC e upgrade WebSocket| D[Durable Object por sala]
+    D --> S[(SQLite persistente por sala)]
+    B -->|uploads e leitura autorizada| R[(R2 privado - mapas e fotos)]
+```
+
+### Modelo de dados
+
+**Sala:** id aleatório, nome, id do mapa ativo.
+
+**Membro:** id, nome de exibição, papel (mestre/jogador), hash SHA-256 do token aleatório, ficha opcional e posição `(x,y)` em percentuais do tabuleiro.
+
+**Ficha:** nome, espécie, classe, nível, PV atual/máx., CA, seis atributos, história e ID do retrato.
+
+**Mensagens:** id, autor, tipo (texto/rolagem/sistema), conteúdo e timestamp. Limite de retenção: 120.
+
+**Mídia:** id (UUID), tipo (retrato ou mapa), ID de quem enviou. Objeto físico em R2: `SALA/UUID`.
+
+## Permissões
+
+| Ação | Mestre | Jogador |
+|---|---|---|
+| Entrar na sala | Criador | Com link, até oito |
+| Enviar chat/rolar dados | Sim | Sim |
+| Criar/editar ficha própria | Sim | Sim |
+| Enviar foto para sua ficha | Sim | Sim |
+| Enviar/trocar mapa | Sim | Não |
+| Mover seu token | Sim | Sim |
+| Mover token de outro jogador | Sim | Não |
+| Ver retratos e mapa da sala | Sim | Sim |
+
+A identidade do membro não é enviada pelo cliente como autoridade: o servidor a deduz do token de sessão validado. A UI não é o mecanismo de segurança.
+
+## Fluxo de entrada
+
+1. Criador chama `POST /api/rooms`, recebe `roomId` e token de mestre.
+2. Link contém **somente** `?room=<codigo>` (sem token de sessão).
+3. Outro jogador chama `POST /api/rooms/:room/join` e recebe token próprio.
+4. Ambos pedem o estado autenticado e abrem WebSocket com subprotocolos `arcane-v1` e `auth.<token>`.
+5. Durable Object verifica token, aceita conexão, envia snapshot e sincroniza alterações de ficha, chat, rolagem e posição.
+
+## Uploads
+
+1. Cliente seleciona JPG/PNG/WebP.
+2. POST autenticado com corpo binário para `/api/rooms/:id/media?kind=portrait|map`.
+3. Worker verifica sessão, permissão, limite e bytes iniciais do formato.
+4. Worker grava R2 privado e registra metadado na Durable Object.
+5. Outros membros fazem fetch autenticado para mídia. O navegador converte a resposta em Blob URL. Não há URL pública do bucket.
+
+## Evolução planejada
+
+- **0.2.1:** Testes automatizados E2E, limites de taxa, controles de admissão e expulsão, revogação de sessão, backup/exportação.
+- **0.3:** Grade configurável, foco e zoom, múltiplos mapas, inventário básico e preparação de cenas.
+- **0.4:** Iniciativa, rolagens com modificadores, histórico de combate, ferramentas de mestre.
+- **0.5:** Névoa de guerra, iluminação simples e ambientação sonora opcional.
+
+## Decisões de escopo
+
+**Sem 3D**, sem áudio/vídeo integrado e sem IA obrigatória. O tabuleiro representa a aventura, não tenta substituir o mestre. Evitar D1 na primeira versão porque o SQLite por Durable Object já persiste cada sala e reduz a infraestrutura. Uma eventual galeria global de fichas e contas poderá justificar D1 depois.
