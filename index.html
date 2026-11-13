@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#121018" />
+  <meta name="description" content="Arcane Table: mesa virtual de RPG 2D com personagens personalizados, dados e chat multiplayer." />
+  <title>Arcane Table | The Workshop</title>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><div class="logo">⚔</div><div><small>THE WORKSHOP · RPG</small><strong>ARCANE TABLE</strong></div></div>
+      <div class="right-head"><span class="badge" id="conn-status">● Aguardando</span><span class="version">ALPHA 0.2</span></div>
+    </header>
+
+    <main>
+      <section id="welcome" class="welcome">
+        <div class="hero-text"><span class="eyebrow">SEU MUNDO COMEÇA AQUI</span><h1>Uma mesa.<br><em>Infinitas histórias.</em></h1><p>Convide seus amigos, escolha sua foto, crie um personagem e aventure-se em um mapa 2D. O mestre guia. Os dados decidem.</p><div class="hero-runes">✧ &nbsp; D20 &nbsp; ✧ &nbsp; 2D &nbsp; ✧ &nbsp; MULTIPLAYER &nbsp; ✧</div></div>
+        <div class="welcome-card">
+          <div id="create-panel"><h2>👑 Criar uma mesa</h2><p>Você será o mestre e receberá o link de convite.</p><form id="create-form"><label>Nome da aventura<input id="room-name" maxlength="70" required value="A Masmorra Esquecida" /></label><label>Seu nome na mesa<input id="host-name" maxlength="32" required placeholder="Ex.: Mestre Ôni" /></label><button class="gold-btn" type="submit">Criar sala →</button></form></div>
+          <div id="join-panel" hidden><h2>🎲 Entrar na aventura</h2><p id="invite-description">Você recebeu um convite para uma mesa.</p><form id="join-form"><label>Como devemos te chamar?<input id="player-name" maxlength="32" required placeholder="Ex.: Renard" /></label><button class="gold-btn" type="submit">Entrar na sala →</button></form><button id="back-home" class="text-btn">Criar minha própria mesa</button></div>
+          <p id="welcome-error" role="alert" class="error"></p>
+        </div>
+      </section>
+
+      <section id="game" class="game" hidden>
+        <div class="game-head"><div><div class="eyebrow" id="role-label">MESA DE AVENTURA</div><h1 id="game-title">Aventura</h1></div><div class="game-actions"><span id="room-code" class="room-code"></span><button id="copy-link" class="btn">🔗 Copiar convite</button><button id="edit-character" class="gold-btn">✦ Minha ficha</button></div></div>
+        <div class="game-layout">
+          <aside class="sidebar players-panel"><h2>⚔ Aventureiros <span id="player-count" class="count">0</span></h2><div id="players" class="players"></div><div class="panel-foot">Clique em sua ficha para editá-la. O mestre também pode movimentar os tokens.</div></aside>
+          <section class="table-panel"><div class="table-toolbar"><div><strong>🗺️ Mapa da aventura</strong><small id="map-hint">Clique no cenário para mover seu personagem.</small></div><div class="map-buttons"><label id="map-upload-btn" class="btn" hidden>⬆ Mapa do mestre<input id="map-file" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label></div></div><div id="board" class="board" aria-label="Mapa interativo 2D"><img id="board-map" hidden alt="Mapa enviado pelo mestre" /><div class="board-grid"></div><div class="board-center" id="board-empty"><span>✦</span><strong>O mundo aguarda seu mestre</strong><small>O mestre pode enviar um mapa. Tokens funcionam mesmo sem imagem.</small></div><div id="token-layer" class="token-layer"></div></div><div class="board-footer"><span>◇ Mapa 2D · Sem personagens 3D</span><span id="board-message">Arraste seu token ou clique no mapa.</span></div></section>
+          <aside class="sidebar chat-panel"><div class="chat-head"><h2>💬 Crônicas da mesa</h2><small>Chat e dados ao vivo</small></div><div id="chat-log" class="chat-log" aria-live="polite"></div><form id="chat-form" class="chat-form"><input id="chat-input" maxlength="600" autocomplete="off" placeholder="Escreva sua ação ou fala..." required /><button type="submit" title="Enviar mensagem">➤</button></form><div class="dice-bar"><span>🎲 Rolar:</span><button data-roll="d4">d4</button><button data-roll="d6">d6</button><button data-roll="d8">d8</button><button data-roll="d10">d10</button><button data-roll="d12">d12</button><button data-roll="d20">d20</button></div></aside>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="character-dialog" class="character-dialog"><form id="character-form" method="dialog"><div class="dialog-head"><div><small class="eyebrow">PERSONAGEM</small><h2>Minha ficha</h2></div><button type="button" id="close-sheet" class="close-btn" aria-label="Fechar">✕</button></div><div class="sheet-layout"><div class="sheet-photo"><div id="photo-preview" class="photo-preview">✧</div><label class="btn photo-button">📷 Escolher retrato<input id="portrait-file" type="file" accept="image/png,image/jpeg,image/webp" hidden /></label><p>Foto vira token 2D no mapa. Máximo de 5 MB.</p></div><div class="sheet-details"><label>Nome do personagem<input id="c-name" maxlength="60" required placeholder="Ex.: Renard Wolfen" /></label><div class="two-col"><label>Espécie<input id="c-ancestry" maxlength="40" value="Humano" /></label><label>Classe<input id="c-class" maxlength="40" value="Guerreiro" /></label><label>Nível<input id="c-level" type="number" min="1" max="20" value="1" /></label><label>Armadura (CA)<input id="c-ac" type="number" min="0" max="99" value="10" /></label><label>Vida atual<input id="c-hp" type="number" min="0" max="999" value="10" /></label><label>Vida máxima<input id="c-maxhp" type="number" min="1" max="999" value="10" /></label></div><span class="subheading">Atributos</span><div class="attributes"><label>FOR<input id="c-str" type="number" min="1" max="30" value="10" /></label><label>DES<input id="c-dex" type="number" min="1" max="30" value="10" /></label><label>CON<input id="c-con" type="number" min="1" max="30" value="10" /></label><label>INT<input id="c-int" type="number" min="1" max="30" value="10" /></label><label>SAB<input id="c-wis" type="number" min="1" max="30" value="10" /></label><label>CAR<input id="c-cha" type="number" min="1" max="30" value="10" /></label></div><label>História / anotações<textarea id="c-story" maxlength="1200" rows="3" placeholder="Quem é seu aventureiro?"></textarea></label></div></div><div class="dialog-actions"><span id="sheet-error" class="error" role="alert"></span><button id="save-sheet" type="submit" class="gold-btn">Salvar ficha</button></div></form></dialog>
+  </div>
+  <script type="module" src="/src/client/main.ts"></script>
+</body>
+</html>
