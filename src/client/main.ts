@@ -240,11 +240,33 @@ function renderChat() {
   }
   if (atBottom || !oldLast) log.scrollTop = log.scrollHeight;
 }
-async function upload(file: File, kind: 'portrait'|'map'): Promise<string> {
-  if (file.size > (kind === 'map' ? 10_000_000 : 5_000_000)) throw new Error('Imagem ultrapassa o limite de tamanho.');
+async function optimizeImage(file: File, kind: 'portrait'|'map'): Promise<Blob> {
   if (!['image/jpeg','image/png','image/webp'].includes(file.type)) throw new Error('Use apenas JPG, PNG ou WebP.');
+  if (file.size > 16_000_000) throw new Error('Arquivo original muito grande (máximo 16 MB).');
+  const image = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement('canvas');
+    const limit = kind === 'map' ? 2400 : 640;
+    const ratio = Math.min(1, limit / Math.max(image.width, image.height));
+    canvas.width = Math.max(1, Math.round(image.width * ratio));
+    canvas.height = Math.max(1, Math.round(image.height * ratio));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Seu navegador não conseguiu processar a imagem.');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const max = kind === 'map' ? 1_700_000 : 900_000;
+    for (const quality of [0.88, 0.74, 0.58, 0.4]) {
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (blob && blob.size && blob.size <= max) return blob;
+    }
+    throw new Error('Imagem ainda ficou grande. Use outra foto ou um mapa menor.');
+  } finally { image.close(); }
+}
+async function upload(file: File, kind: 'portrait'|'map'): Promise<string> {
+  const optimized = await optimizeImage(file, kind);
   const result = await api<{mediaId: string}>(`/api/rooms/${roomId}/media?kind=${kind}`, {
-    method: 'POST', headers: { 'Content-Type': file.type }, body: file,
+    method: 'POST', headers: { 'Content-Type': optimized.type }, body: optimized,
   });
   return result.mediaId;
 }
@@ -274,7 +296,7 @@ function openSheet() {
 function previewPhoto(file: File) {
   portraitFile = file;
   const photo = $('photo-preview'); photo.replaceChildren();
-  if (!file.type.startsWith('image/') || file.size > 5_000_000) { message('sheet-error','Use JPG, PNG ou WebP de até 5 MB.'); portraitFile = null; return; }
+  if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 16_000_000) { message('sheet-error','Use JPG, PNG ou WebP de até 16 MB; a foto será otimizada.'); portraitFile = null; return; }
   const blob = URL.createObjectURL(file);
   const img = element('img'); img.src = blob;
   img.onload = () => URL.revokeObjectURL(blob);
