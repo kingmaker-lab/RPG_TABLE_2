@@ -42,3 +42,13 @@ Para simplificar o MVP, toda alteração relevante publica um snapshot completo 
 ```
 
 O cliente usa os IDs para atualizar posições e mídia. Antes de aumentar o número de participantes, mudar para eventos incrementais e controle de frequência de envio.
+
+
+## Limites do beta 0.3
+
+- Imagens convertidas para JPEG no navegador: até **900 KB** por retrato e **1,7 MB** por mapa, após compressão.
+- Persistência de mídia no SQLite do Durable Object da sala. **Não utiliza R2**.
+- Máximo de 30 arquivos e 18 MB por sala.
+- Frequência mínima por membro: chat 650 ms, dados 450 ms, movimento 80 ms, ficha 350 ms.
+- As rotas de mídia exigem Bearer válido, e somente o mestre envia mapas.
+- Limites por IP, revogação de tokens e expulsão de jogadores ainda não estão disponíveis.

@@ -46,7 +46,7 @@ npm install
 npm run dev
 ```
 
-O comando `cf dev` aciona o Vite/Cloudflare plugin. Abra a URL local informada no terminal e use duas abas ou navegadores para criar e entrar na mesma sala. O backend deve funcionar **localmente com simulação de Durable Object e R2**, sem publicar. A configuração do CLI pode exigir ajustes quando houver mudanças no beta.
+O comando `cf dev` aciona o Vite/Cloudflare plugin. Abra a URL local informada no terminal e use duas abas ou navegadores para criar e entrar na mesma sala. O backend deve funcionar **localmente com simulação de Durable Object (SQLite) e armazenamento de mídia na própria sala**, sem publicar. A configuração do CLI pode exigir ajustes quando houver mudanças no beta.
 
 Para construir e publicar na conta Cloudflare:
 

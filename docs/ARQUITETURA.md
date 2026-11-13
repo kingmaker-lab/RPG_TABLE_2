@@ -1,4 +1,4 @@
-# Arquitetura | Arcane Table 0.2
+# Arquitetura | Arcane Table 0.3 beta
 
 ## Caminho principal
 
@@ -8,7 +8,7 @@ flowchart LR
     M[Mestre - navegador] -->|HTTPS e WebSocket| B
     B -->|RPC e upgrade WebSocket| D[Durable Object por sala]
     D --> S[(SQLite persistente por sala)]
-    B -->|uploads e leitura autorizada| R[(R2 privado - mapas e fotos)]
+    B -->|upload e leitura autenticados| D
 ```
 
 ### Modelo de dados
@@ -21,7 +21,7 @@ flowchart LR
 
 **Mensagens:** id, autor, tipo (texto/rolagem/sistema), conteúdo e timestamp. Limite de retenção: 120.
 
-**Mídia:** id (UUID), tipo (retrato ou mapa), ID de quem enviou. Objeto físico em R2: `SALA/UUID`.
+**Mídia:** id (UUID), tipo (retrato ou mapa), proprietário, MIME, bytes (BLOB) e tamanho no SQLite privado do Durable Object. Máximo de 18 MB e 30 arquivos por sala.
 
 ## Permissões
 
@@ -48,18 +48,18 @@ A identidade do membro não é enviada pelo cliente como autoridade: o servidor 
 
 ## Uploads
 
-1. Cliente seleciona JPG/PNG/WebP.
+1. Cliente seleciona JPG/PNG/WebP; o navegador otimiza e converte para JPEG (até 900 KB retrato / 1,7 MB mapa).
 2. POST autenticado com corpo binário para `/api/rooms/:id/media?kind=portrait|map`.
 3. Worker verifica sessão, permissão, limite e bytes iniciais do formato.
-4. Worker grava R2 privado e registra metadado na Durable Object.
-5. Outros membros fazem fetch autenticado para mídia. O navegador converte a resposta em Blob URL. Não há URL pública do bucket.
+4. Worker envia os bytes ao Durable Object, que valida a sessão e grava mídia no SQLite privado.
+5. Outros membros fazem fetch autenticado; navegador gera Blob URL temporária. Não existe bucket público nem dependência de R2.
 
 ## Evolução planejada
 
-- **0.2.1:** Testes automatizados E2E, limites de taxa, controles de admissão e expulsão, revogação de sessão, backup/exportação.
-- **0.3:** Grade configurável, foco e zoom, múltiplos mapas, inventário básico e preparação de cenas.
-- **0.4:** Iniciativa, rolagens com modificadores, histórico de combate, ferramentas de mestre.
-- **0.5:** Névoa de guerra, iluminação simples e ambientação sonora opcional.
+- **0.3.1:** Testes automatizados E2E e rate limit por IP, controles de admissão/expulsão, revogação de sessão e backup/exportação.
+- **0.4:** Grade configurável, foco e zoom, múltiplos mapas, inventário básico e preparação de cenas.
+- **0.5:** Iniciativa, rolagens com modificadores, histórico de combate, ferramentas de mestre.
+- **0.6:** Névoa de guerra, iluminação simples e ambientação sonora opcional.
 
 ## Decisões de escopo
 
